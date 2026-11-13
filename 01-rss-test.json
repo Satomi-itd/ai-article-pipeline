@@ -1,0 +1,56 @@
+{
+  "name": "01-rss-test",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "dc3b8506-1749-4e02-9fcc-41b56087629f",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "9892e1be-ced1-45fb-a908-ba5142a55d21",
+      "name": "RSS Read"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "RSS Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "2eac800e-3d97-43fd-9133-2e7b5191cb24",
+  "meta": {
+    "instanceId": "8954ec990f0461b02c192b32cd347b1e5972dff07d849ca8ca63a5da96768537"
+  },
+  "nodeGroups": [],
+  "id": "XmUWShhGULcIRrRT",
+  "tags": []
+}
