@@ -1,0 +1,108 @@
+{
+  "name": "03-claude-discord-test",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "4df0a051-8d52-4328-bb51-eafee4578c28",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-haiku-5-5",
+          "mode": "list",
+          "cachedResultName": "claude-haiku-5-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "CISAとは何か、日本語で1文で説明して"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "05fb70c0-1e3f-4635-bf79-181e7fea7e32",
+      "name": "Message a model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "Wsy5BHpGsqDjwwDU",
+          "name": "Claude API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "content": "={{ $json.content[0].text }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        592,
+        0
+      ],
+      "id": "2fc524fc-35bd-4c91-8e95-87bd0a229f4b",
+      "name": "Discord",
+      "webhookId": "0aeb86a6-fa6b-4a0a-96b3-2c410c0fe7ce",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "65abfFBDs6oOmZWe",
+          "name": "Discord drafts"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "9d86a869-6c38-4cc2-9e0d-f80b160073bb",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8954ec990f0461b02c192b32cd347b1e5972dff07d849ca8ca63a5da96768537"
+  },
+  "nodeGroups": [],
+  "id": "Fnu4kK1YOFQ0Rdpq",
+  "tags": []
+}
