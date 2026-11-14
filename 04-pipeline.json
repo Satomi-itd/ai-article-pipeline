@@ -1,0 +1,424 @@
+{
+  "name": "04-pipeline",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "5397feeb-4471-4d9c-aafe-b07581a1522e",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "59862303-26dc-4ca2-bafa-b1e6ef04889a",
+      "name": "RSS Read"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        672,
+        0
+      ],
+      "id": "917a092c-0ce3-486a-a497-82c12d0ab4db",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-haiku-5-5",
+          "mode": "list",
+          "cachedResultName": "claude-haiku-5-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=あなたはセキュリティニュースの編集者です。下の CISA のアドバイザリをもとに、日本の IT 担当者向けの解説記事の下書きを作ってください。\n\nルール：\n- 原文にない事実や数字を書かない\n- 原文をそのまま訳さず、自分の構成でまとめる\n- CVE 番号、製品名、バージョンは原文のとおりに書く\n- 出力は JSON だけ。前後に説明文や ``` を付けない\n- 本文（body_html）は全体で1000字以内にまとめる\n\n\nJSON の形：\n{\n  \"title\": \"60字以内のタイトル\",\n  \"summary\": \"3文以内の要約\",\n  \"body_html\": \"<h2>何が起きたか</h2>...<h2>影響を受ける製品</h2>...<h2>やるべきこと</h2>...<p>出典：<a href=\\\"原文のURL\\\">CISA</a></p>\",\n  \"tags\": [\"タグ1\", \"タグ2\"],\n  \"source_url\": \"原文のURL\"\n}\n\n原文のタイトル：{{ $json.title }}\n原文のURL：{{ $json.link }}\n原文：\n{{ $json.contentSnippet }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 4000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        896,
+        0
+      ],
+      "id": "b3f8ffeb-2396-488f-b821-0adcb56a0733",
+      "name": "Message a model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "Wsy5BHpGsqDjwwDU",
+          "name": "Claude API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// 1. Claude の返事から text のブロックを探す\nconst blocks = $input.item.json.content || [];\nconst textBlock = blocks.find(b => b.type === 'text');\nconst raw = textBlock ? textBlock.text : '';\n\n// 元の RSS 記事（Limit ノードの中身）\nconst src = $('Limit').item.json;\nconst srcText = (src.title || '') + ' ' + (src.contentSnippet || src.content || '');\n\nconst errors = [];\nconst warnings = [];\n\n// 2. JSON として読めるか\nlet draft = null;\ntry {\n   const start = raw.indexOf('{'), end = raw.lastIndexOf('}');\n  const cleaned = start >= 0 && end > start ? raw.slice(start, end + 1) : raw;\n  draft = JSON.parse(cleaned);\n} catch (e) {\nerrors.push('JSONとして読めない：' + e.message);\n}\n\nif (draft) {\n  // 3. 必須の項目\n  for (const key of ['title', 'summary', 'body_html', 'source_url']) {\n    if (!draft[key]) errors.push(`${key} がない`);\n  }\n  const title = draft.title || '';\n  const body = draft.body_html || '';\n  const bodyText = body.replace(/<[^>]+>/g, '');\n\n  // 4. 文字数\n  if (title.length > 60) errors.push(`タイトルが長い（${title.length}字）`);\n  if (bodyText.length < 600) warnings.push(`本文が短い（${bodyText.length}字）`);\n  if (bodyText.length > 1500) warnings.push(`本文が長い（${bodyText.length}字）`);\n\n  // 5. 出典リンク\n  if (draft.source_url !== src.link) errors.push('source_url が RSS のリンクと違う');\n  if (!body.includes(src.link)) errors.push('本文に出典リンクがない');\n\n  // 6. 必須の見出し\n  for (const h of ['何が起きたか', '影響を受ける製品', 'やるべきこと']) {\n    if (!body.includes(h)) warnings.push(`見出し「${h}」がない`);\n  }\n\n  // 7. CVE 番号：原文にないものは NG\n  const cves = [...new Set((title + ' ' + bodyText).match(/CVE-\\d{4}-\\d{4,}/g) || [])];\n  for (const cve of cves) {\n    if (!srcText.includes(cve)) errors.push(`原文にないCVE番号：${cve}`);\n  }\n\n  // 8. 数字：原文にないものは警告（全角を半角にそろえてから比べる）\n  const toHalf = s => s.replace(/[０-９．]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));\n  const srcHalf = toHalf(srcText);\n  const nums = [...new Set(toHalf(bodyText).match(/\\d+(\\.\\d+)?/g) || [])];\n  const unknown = nums.filter(n => n.length >= 2 && !srcHalf.includes(n));\n  if (unknown.length) warnings.push(`原文に見つからない数字：${unknown.slice(0, 10).join(', ')}`);\n}\n\nreturn {\n  json: {\n    pass: errors.length === 0,\n    errors,\n    warnings,\n    draft,\n    source_title: src.title,\n    source_url: src.link,\n    raw_end: raw.slice(-150),\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        0
+      ],
+      "id": "cbd0170c-7883-4042-bd1e-3e235cda5c3b",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "94e87c13-732f-459b-8268-94909a5c5fa5",
+              "leftValue": "={{ $json.pass }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1488,
+        0
+      ],
+      "id": "de0eeed8-c3ea-4fa5-8234-651d53d46cd1",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://wordpress/wp-json/wp/v2/posts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "title",
+              "value": "={{ $json.draft.title }}"
+            },
+            {
+              "name": "content",
+              "value": "={{ $json.draft.body_html }}"
+            },
+            {
+              "name": "excerpt",
+              "value": "={{ $json.draft.summary }}"
+            },
+            {
+              "name": "status",
+              "value": "draft"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1712,
+        -96
+      ],
+      "id": "6f4290e5-7e8b-4f11-a98d-9472c76ca41b",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "SaMqawia5jOCwCHd",
+          "name": "WordPress local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "content": "=✅ 下書きができました\nタイトル：{{ $('Code in JavaScript').item.json.draft.title }}\n編集：http://localhost:8080/wp-admin/post.php?post={{ $('HTTP Request').item.json.id }}&action=edit\n出典：{{ $('Code in JavaScript').item.json.source_url }}\n警告：{{ $('Code in JavaScript').item.json.warnings.join(' / ') || 'なし' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        -96
+      ],
+      "id": "55e6e79b-4172-44d7-be2e-652cc4a40353",
+      "name": "Discord",
+      "webhookId": "cc795d0f-8dee-47ce-acb6-d3904e60417b",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "65abfFBDs6oOmZWe",
+          "name": "Discord drafts"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "content": "=❌ 検証 NG のため、下書きを作りませんでした\n元の記事：{{ $json.source_title }}\n{{ $json.source_url }}\n理由：{{ $json.errors.join(' / ') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        96
+      ],
+      "id": "ee396c86-6f23-429b-bc1e-dc2e7dab575d",
+      "name": "Discord1",
+      "webhookId": "14e7295b-cedd-474b-847f-afb0645ff67e",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "65abfFBDs6oOmZWe",
+          "name": "Discord drafts"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "rowNotExists",
+        "dataTableId": {
+          "__rl": true,
+          "value": "YRKCBp27yctbIAOJ",
+          "mode": "list",
+          "cachedResultName": "processed_articles",
+          "cachedResultUrl": "/projects/RrRiIFVUTZXUIerR/datatables/YRKCBp27yctbIAOJ"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "Link",
+              "keyValue": "={{ $json.link }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        0
+      ],
+      "id": "374258b0-2548-42c6-9aba-612bcac87ba5",
+      "name": "If row does not exist"
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "YRKCBp27yctbIAOJ",
+          "mode": "list",
+          "cachedResultName": "processed_articles",
+          "cachedResultUrl": "/projects/RrRiIFVUTZXUIerR/datatables/YRKCBp27yctbIAOJ"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Link": "={{ $('Code in JavaScript').item.json.source_url }}",
+            "Title": "={{ $('Code in JavaScript').item.json.draft.title }}",
+            "Status": "draft"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Link",
+              "displayName": "Link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Title",
+              "displayName": "Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1936,
+        -96
+      ],
+      "id": "79c42871-62ce-4076-8131-fb22ce94bc2b",
+      "name": "Insert row"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "RSS Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read": {
+      "main": [
+        [
+          {
+            "node": "If row does not exist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Discord1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Insert row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If row does not exist": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert row": {
+      "main": [
+        [
+          {
+            "node": "Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "91c18c2b-245f-451d-8a88-5cf1ea2d2fd9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8954ec990f0461b02c192b32cd347b1e5972dff07d849ca8ca63a5da96768537"
+  },
+  "nodeGroups": [],
+  "id": "B1A7YjvJfavqQVqk",
+  "tags": []
+}
