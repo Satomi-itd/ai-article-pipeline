@@ -1,4 +1,6 @@
 # ai-article-pipeline
+## Demo
+   ▶️ 2-minute demo video: https://youtu.be/luNgXDkoYLk
 
 An n8n workflow that checks security advisories every morning, has Claude write a draft article, **verifies the draft before it goes anywhere**, saves it to WordPress as a draft, and notifies Discord.
 
